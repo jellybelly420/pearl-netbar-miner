@@ -1,0 +1,10 @@
+/bin/
+/data/
+/logs/
+/miners/
+/config.json
+/agent-state.json
+*.exe
+*.log
+.DS_Store
+

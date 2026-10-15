@@ -1,0 +1,43 @@
+{
+  "agent_id": "seat-001",
+  "agent_secret": "replace-with-the-one-time-enrollment-secret",
+  "control_url": "https://control.example.com",
+  "poll_seconds": 10,
+  "heartbeat_seconds": 30,
+  "state_path": "agent-state.json",
+  "miner": {
+    "version": "0.51.4",
+    "url": "https://github.com/andru-kun/wildrig-multi/releases/download/0.51.4/wildrig-multi-windows-0.51.4.zip",
+    "sha256": "25b8cf133ee513a9b82d87bab7e277aff32d4472aac79c4ab3053d7653867c0d",
+    "executable": "wildrig.exe",
+    "executable_sha256": "c656c5c29c98b2d9167f73d9f9237823f790f5aadd3848322c5997a257798788",
+    "install_dir": "miners/wildrig-0.51.4"
+  },
+  "mining": {
+    "wallet": "prl1-replace-with-your-wallet",
+    "worker": "seat-001",
+    "pool": "pool.pearlhash.xyz:9000",
+    "password": "x",
+    "api_port": 4002,
+    "gpu_list": "",
+    "power_limit": 0,
+    "temperature_limit": 80,
+    "temperature_resume": 60
+  },
+  "policy": {
+    "mode": "smart",
+    "start_idle_seconds": 300,
+    "stop_idle_below_seconds": 15,
+    "resume_cooldown_seconds": 60,
+    "pause_on_fullscreen": true,
+    "pause_on_other_gpu_process": true,
+    "blocked_processes": [
+      "steam.exe",
+      "epicgameslauncher.exe",
+      "valorant.exe",
+      "cs2.exe"
+    ],
+    "allowed_fullscreen_processes": []
+  }
+}
+
