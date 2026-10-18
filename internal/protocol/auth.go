@@ -19,6 +19,7 @@ const (
 	HeaderTimestamp = "X-Pearl-Timestamp"
 	HeaderNonce     = "X-Pearl-Nonce"
 	HeaderSignature = "X-Pearl-Signature"
+	maxBodyBytes    = 1 << 20
 )
 
 func SignRequest(request *http.Request, secret string, now time.Time) error {
@@ -76,9 +77,12 @@ func bodyBytes(request *http.Request) ([]byte, error) {
 	if request.Body == nil {
 		return nil, nil
 	}
-	body, err := io.ReadAll(io.LimitReader(request.Body, 1<<20))
+	body, err := io.ReadAll(io.LimitReader(request.Body, maxBodyBytes+1))
 	if err != nil {
 		return nil, err
+	}
+	if len(body) > maxBodyBytes {
+		return nil, errors.New("request body exceeds 1 MiB")
 	}
 	request.Body.Close()
 	request.Body = io.NopCloser(strings.NewReader(string(body)))

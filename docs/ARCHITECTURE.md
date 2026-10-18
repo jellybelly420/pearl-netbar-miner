@@ -2,7 +2,7 @@
 
 ## Scope
 
-The first production slice is deliberately small:
+The production slice remains PRL-specific:
 
 - `pearl-agent`: one Windows process per seat;
 - `pearl-control`: a private fleet API and dashboard;
@@ -14,23 +14,27 @@ an external process with a pinned distribution hash.
 ## Data flow
 
 ```text
-operator -> admin API -> persisted command queue
-                               |
-                         signed polling
-                               v
-Windows signals -> policy -> pearl-agent -> WildRig -> PRL pool
-                         |
-                     heartbeat
-                         v
-                 private fleet service
+viewer/operator/admin -> fleet API -> persisted command queue + audit
+                                          |
+                              HTTPS response to HMAC poll
+                                          v
+all processes + Windows input + NVIDIA GPU -> policy -> pearl-agent
+                                                        |       |
+                                             verified miner     | HMAC heartbeat
+                                                        v       v
+                                                     WildRig  fleet service
+                                                        |
+                                                     PRL pool
 ```
 
 ## Trust boundaries
 
-1. Admin API: bearer token, HTTPS required in production.
+1. Fleet API: distinct viewer/operator/admin bearer tokens; HTTPS required.
 2. Agent API: per-seat HMAC key, timestamp window, nonce replay cache.
-3. Miner supply chain: fixed URL plus fixed SHA-256; archive traversal blocked.
+3. Miner supply chain: pinned hashes or an owner-signed Ed25519 manifest;
+   archive traversal blocked and stale manifests rejected.
 4. Process execution: deterministic arguments; no remote arbitrary command.
+5. Windows power actions: a local per-seat flag must permit them.
 
 ## Persistence
 
@@ -45,15 +49,18 @@ more than a few hundred seats.
 - Smart policy defaults to stopping rather than starting when sensing fails.
 - Miner start is idempotent; downloads are verified and installed atomically.
 - Commands remain queued until acknowledged.
+- Command acknowledgements contain an explicit success/error result.
+- Hash/share health checks use bounded restart budgets and a cooldown.
+- Signed miner updates use deterministic canaries and retain one rollback target.
 
 ## Growth path
 
-Revisit these choices when the core is validated on real Windows hardware:
+Revisit these choices when the fleet grows:
 
-- signed release/update metadata and rollback protection;
 - persistent command expiry and per-command signatures;
-- WildRig hashrate/share API parser;
-- per-GPU tuning with health-triggered rollback;
-- role-based access control and multi-site tenancy;
-- append-only audit log and metrics storage.
+- SQLite/PostgreSQL plus append-only metrics storage;
+- multi-site tenancy and external identity provider integration;
+- Windows-code-signed agent self-update;
+- diskless-image enrollment with short-lived provisioning credentials;
+- native AMD/Intel process and telemetry providers.
 

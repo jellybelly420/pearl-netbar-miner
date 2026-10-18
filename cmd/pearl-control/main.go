@@ -44,12 +44,24 @@ func serve(arguments []string) {
 	if len(adminToken) < 32 {
 		log.Fatal("PEARL_ADMIN_TOKEN must contain at least 32 characters")
 	}
+	operatorToken := os.Getenv("PEARL_OPERATOR_TOKEN")
+	viewerToken := os.Getenv("PEARL_VIEWER_TOKEN")
+	for name, token := range map[string]string{"PEARL_OPERATOR_TOKEN": operatorToken, "PEARL_VIEWER_TOKEN": viewerToken} {
+		if token != "" && len(token) < 32 {
+			log.Fatalf("%s must contain at least 32 characters when set", name)
+		}
+	}
+	if (operatorToken != "" && operatorToken == adminToken) || (viewerToken != "" && (viewerToken == adminToken || viewerToken == operatorToken)) {
+		log.Fatal("admin, operator, and viewer tokens must be different")
+	}
 	store, err := control.OpenStore(*data)
 	if err != nil {
 		log.Fatal(err)
 	}
 	server := &http.Server{
-		Addr: *listen, Handler: control.NewServer(store, adminToken),
+		Addr: *listen, Handler: control.NewServerWithAccess(store, control.Access{
+			AdminToken: adminToken, OperatorToken: operatorToken, ViewerToken: viewerToken,
+		}),
 		ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 15 * time.Second,
 		WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second,
 	}

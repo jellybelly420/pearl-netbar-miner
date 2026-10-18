@@ -27,12 +27,16 @@ var (
 	procGetMonitorInfoW           = user32.NewProc("GetMonitorInfoW")
 	procOpenProcess               = kernel32.NewProc("OpenProcess")
 	procQueryFullProcessImageName = kernel32.NewProc("QueryFullProcessImageNameW")
+	procCreateToolhelp32Snapshot  = kernel32.NewProc("CreateToolhelp32Snapshot")
+	procProcess32FirstW           = kernel32.NewProc("Process32FirstW")
+	procProcess32NextW            = kernel32.NewProc("Process32NextW")
 	procCloseHandle               = kernel32.NewProc("CloseHandle")
 )
 
 const (
 	processQueryLimitedInformation = 0x1000
 	monitorDefaultToNearest        = 2
+	th32csSnapProcess              = 0x00000002
 )
 
 type lastInputInfo struct {
@@ -49,6 +53,19 @@ type monitorInfo struct {
 	Flags   uint32
 }
 
+type processEntry32 struct {
+	Size              uint32
+	Usage             uint32
+	ProcessID         uint32
+	DefaultHeapID     uintptr
+	ModuleID          uint32
+	Threads           uint32
+	ParentProcessID   uint32
+	PriorityClassBase int32
+	Flags             uint32
+	ExeFile           [260]uint16
+}
+
 type windowsSensor struct{}
 
 func newSensor() Sensor { return windowsSensor{} }
@@ -59,12 +76,14 @@ func (windowsSensor) Snapshot(ctx context.Context, excluded []string) (Snapshot,
 		return Snapshot{}, err
 	}
 	foreground, fullscreen := foregroundInfo()
-	gpus, _ := queryGPUs(ctx)
-	otherGPU, processErr := hasOtherGPUProcess(ctx, excluded)
+	processes, scanErr := runningProcesses()
+	gpus, gpuErr := queryGPUs(ctx)
+	otherGPU, gpuProcessErr := hasOtherGPUProcess(ctx, excluded)
 	return Snapshot{
 		CapturedAt: time.Now().UTC(), IdleSeconds: int64(idle.Seconds()), Foreground: foreground,
-		Fullscreen: fullscreen, OtherGPUProcess: otherGPU, GPUProcessKnown: processErr == nil,
-		GPUs: gpus, SensingAvailable: true,
+		Fullscreen: fullscreen, RunningProcesses: processes, ProcessScanKnown: scanErr == nil,
+		OtherGPUProcess: otherGPU, GPUProcessKnown: gpuProcessErr == nil,
+		GPUs: gpus, GPUMetricsKnown: gpuErr == nil, SensingAvailable: true,
 	}, nil
 }
 
@@ -117,6 +136,32 @@ func processName(pid uint32) string {
 		return ""
 	}
 	return filepath.Base(syscall.UTF16ToString(buffer[:size]))
+}
+
+func runningProcesses() ([]string, error) {
+	handle, _, callErr := procCreateToolhelp32Snapshot.Call(th32csSnapProcess, 0)
+	if handle == ^uintptr(0) {
+		return nil, callErr
+	}
+	defer procCloseHandle.Call(handle)
+
+	entry := processEntry32{Size: uint32(unsafe.Sizeof(processEntry32{}))}
+	ok, _, firstErr := procProcess32FirstW.Call(handle, uintptr(unsafe.Pointer(&entry)))
+	if ok == 0 {
+		return nil, firstErr
+	}
+	processes := make([]string, 0, 128)
+	for {
+		if name := strings.TrimSpace(syscall.UTF16ToString(entry.ExeFile[:])); name != "" {
+			processes = append(processes, name)
+		}
+		entry.Size = uint32(unsafe.Sizeof(processEntry32{}))
+		next, _, _ := procProcess32NextW.Call(handle, uintptr(unsafe.Pointer(&entry)))
+		if next == 0 {
+			break
+		}
+	}
+	return processes, nil
 }
 
 func queryGPUs(ctx context.Context) ([]GPU, error) {

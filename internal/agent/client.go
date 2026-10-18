@@ -36,8 +36,8 @@ func (c *Client) Commands(after uint64) ([]control.Command, error) {
 	return commands, err
 }
 
-func (c *Client) Ack(sequence uint64) error {
-	return c.doJSON(http.MethodPost, fmt.Sprintf("/api/v1/agent/commands/%d/ack", sequence), map[string]bool{"ok": true}, nil)
+func (c *Client) Ack(sequence uint64, acknowledgement control.CommandAck) error {
+	return c.doJSON(http.MethodPost, fmt.Sprintf("/api/v1/agent/commands/%d/ack", sequence), acknowledgement, nil)
 }
 
 func (c *Client) doJSON(method, path string, input, output any) error {

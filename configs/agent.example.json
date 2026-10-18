@@ -22,7 +22,10 @@
     "gpu_list": "",
     "power_limit": 0,
     "temperature_limit": 80,
-    "temperature_resume": 60
+    "temperature_resume": 60,
+    "reset_oc_on_start": true,
+    "watchdog": true,
+    "gpu_profiles": []
   },
   "policy": {
     "mode": "smart",
@@ -31,13 +34,38 @@
     "resume_cooldown_seconds": 60,
     "pause_on_fullscreen": true,
     "pause_on_other_gpu_process": true,
+    "pause_on_gpu_utilization": true,
+    "gpu_utilization_threshold": 20,
     "blocked_processes": [
       "steam.exe",
       "epicgameslauncher.exe",
       "valorant.exe",
       "cs2.exe"
     ],
-    "allowed_fullscreen_processes": []
-  }
+    "allowed_fullscreen_processes": [],
+    "schedule_enabled": false,
+    "schedule_start": "00:00",
+    "schedule_stop": "00:00",
+    "rest_after_minutes": 1440,
+    "rest_duration_minutes": 5
+  },
+  "health": {
+    "startup_grace_seconds": 90,
+    "zero_hash_timeout_seconds": 180,
+    "no_share_timeout_seconds": 1800,
+    "restart_cooldown_seconds": 60,
+    "max_restarts": 5,
+    "restart_window_seconds": 3600,
+    "reboot_on_exhausted": false
+  },
+  "update": {
+    "enabled": false,
+    "manifest_url": "https://control.example.com/releases/stable.json",
+    "public_key": "replace-with-your-ed25519-public-key",
+    "channel": "stable",
+    "check_interval_seconds": 1800,
+    "canary_percent": 10
+  },
+  "allow_remote_power_actions": false
 }
 

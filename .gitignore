@@ -6,5 +6,7 @@
 /agent-state.json
 *.exe
 *.log
+manifest-private.key
+*-private.key
 .DS_Store
 

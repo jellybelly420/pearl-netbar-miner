@@ -16,14 +16,32 @@ import (
 )
 
 type Server struct {
-	store      *Store
-	adminToken string
-	nonceMu    sync.Mutex
-	nonces     map[string]time.Time
+	store   *Store
+	access  Access
+	nonceMu sync.Mutex
+	nonces  map[string]time.Time
+}
+
+type Role int
+
+const (
+	RoleViewer Role = iota + 1
+	RoleOperator
+	RoleAdmin
+)
+
+type Access struct {
+	AdminToken    string
+	OperatorToken string
+	ViewerToken   string
 }
 
 func NewServer(store *Store, adminToken string) http.Handler {
-	server := &Server{store: store, adminToken: adminToken, nonces: make(map[string]time.Time)}
+	return NewServerWithAccess(store, Access{AdminToken: adminToken})
+}
+
+func NewServerWithAccess(store *Store, access Access) http.Handler {
+	server := &Server{store: store, access: access, nonces: make(map[string]time.Time)}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(writer http.ResponseWriter, _ *http.Request) {
 		writeJSON(writer, http.StatusOK, map[string]bool{"ok": true})
@@ -33,8 +51,11 @@ func NewServer(store *Store, adminToken string) http.Handler {
 	mux.HandleFunc("GET /api/v1/agent/commands", server.agentCommands)
 	mux.HandleFunc("POST /api/v1/agent/commands/{sequence}/ack", server.agentAck)
 	mux.HandleFunc("GET /api/v1/admin/agents", server.adminAgents)
+	mux.HandleFunc("GET /api/v1/admin/agents/{id}/history", server.adminHistory)
+	mux.HandleFunc("GET /api/v1/admin/audit", server.adminAudit)
 	mux.HandleFunc("POST /api/v1/admin/agents/{id}/enroll", server.adminEnroll)
 	mux.HandleFunc("POST /api/v1/admin/agents/{id}/commands", server.adminCommand)
+	mux.HandleFunc("POST /api/v1/admin/commands/batch", server.adminBatchCommand)
 	return securityHeaders(mux)
 }
 
@@ -83,15 +104,44 @@ func (s *Server) agentAck(writer http.ResponseWriter, request *http.Request) {
 		writeJSON(writer, http.StatusBadRequest, errorResponse(err))
 		return
 	}
-	if err := s.store.Ack(id, sequence); err != nil {
-		writeJSON(writer, http.StatusNotFound, errorResponse(err))
+	var acknowledgement CommandAck
+	if err := decodeJSON(request, &acknowledgement); err != nil {
+		writeJSON(writer, http.StatusBadRequest, errorResponse(err))
+		return
+	}
+	if err := s.store.Ack(id, sequence, acknowledgement); err != nil {
+		status := http.StatusBadRequest
+		if errors.Is(err, os.ErrNotExist) {
+			status = http.StatusNotFound
+		}
+		writeJSON(writer, status, errorResponse(err))
 		return
 	}
 	writeJSON(writer, http.StatusOK, map[string]bool{"ok": true})
 }
 
+func (s *Server) adminHistory(writer http.ResponseWriter, request *http.Request) {
+	if !s.authenticateRole(writer, request, RoleViewer) {
+		return
+	}
+	history, err := s.store.History(request.PathValue("id"))
+	if err != nil {
+		writeJSON(writer, http.StatusNotFound, errorResponse(err))
+		return
+	}
+	writeJSON(writer, http.StatusOK, history)
+}
+
+func (s *Server) adminAudit(writer http.ResponseWriter, request *http.Request) {
+	if !s.authenticateRole(writer, request, RoleViewer) {
+		return
+	}
+	limit, _ := strconv.Atoi(request.URL.Query().Get("limit"))
+	writeJSON(writer, http.StatusOK, s.store.Audit(limit))
+}
+
 func (s *Server) adminAgents(writer http.ResponseWriter, request *http.Request) {
-	if !s.authenticateAdmin(writer, request) {
+	if !s.authenticateRole(writer, request, RoleViewer) {
 		return
 	}
 	writeJSON(writer, http.StatusOK, s.store.Agents())
@@ -111,15 +161,15 @@ func (s *Server) adminEnroll(writer http.ResponseWriter, request *http.Request) 
 }
 
 func (s *Server) adminCommand(writer http.ResponseWriter, request *http.Request) {
-	if !s.authenticateAdmin(writer, request) {
-		return
-	}
 	var body struct {
 		Type    string            `json:"type"`
 		Payload map[string]string `json:"payload"`
 	}
 	if err := decodeJSON(request, &body); err != nil {
 		writeJSON(writer, http.StatusBadRequest, errorResponse(err))
+		return
+	}
+	if !s.authenticateRole(writer, request, requiredRole(body.Type)) {
 		return
 	}
 	command, err := s.store.Queue(request.PathValue("id"), body.Type, body.Payload)
@@ -132,6 +182,27 @@ func (s *Server) adminCommand(writer http.ResponseWriter, request *http.Request)
 		return
 	}
 	writeJSON(writer, http.StatusCreated, command)
+}
+
+func (s *Server) adminBatchCommand(writer http.ResponseWriter, request *http.Request) {
+	var body struct {
+		AgentIDs []string          `json:"agent_ids"`
+		Type     string            `json:"type"`
+		Payload  map[string]string `json:"payload"`
+	}
+	if err := decodeJSON(request, &body); err != nil {
+		writeJSON(writer, http.StatusBadRequest, errorResponse(err))
+		return
+	}
+	if !s.authenticateRole(writer, request, requiredRole(body.Type)) {
+		return
+	}
+	commands, err := s.store.QueueBatch(body.AgentIDs, body.Type, body.Payload)
+	if err != nil {
+		writeJSON(writer, http.StatusBadRequest, errorResponse(err))
+		return
+	}
+	writeJSON(writer, http.StatusCreated, commands)
 }
 
 func (s *Server) authenticateAgent(writer http.ResponseWriter, request *http.Request) (string, []byte, bool) {
@@ -170,18 +241,58 @@ func (s *Server) acceptNonce(key string, now time.Time) bool {
 }
 
 func (s *Server) authenticateAdmin(writer http.ResponseWriter, request *http.Request) bool {
+	return s.authenticateRole(writer, request, RoleAdmin)
+}
+
+func (s *Server) authenticateRole(writer http.ResponseWriter, request *http.Request, required Role) bool {
 	provided := strings.TrimPrefix(request.Header.Get("Authorization"), "Bearer ")
-	if len(provided) != len(s.adminToken) || subtle.ConstantTimeCompare([]byte(provided), []byte(s.adminToken)) != 1 {
-		writeJSON(writer, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+	role := Role(0)
+	for _, candidate := range []struct {
+		token string
+		role  Role
+	}{{s.access.AdminToken, RoleAdmin}, {s.access.OperatorToken, RoleOperator}, {s.access.ViewerToken, RoleViewer}} {
+		if candidate.token == "" || len(provided) != len(candidate.token) {
+			continue
+		}
+		if subtle.ConstantTimeCompare([]byte(provided), []byte(candidate.token)) == 1 {
+			role = candidate.role
+			break
+		}
+	}
+	if role < required {
+		status := http.StatusForbidden
+		if role == 0 {
+			status = http.StatusUnauthorized
+		}
+		writeJSON(writer, status, map[string]string{"error": "insufficient role"})
 		return false
 	}
 	return true
 }
 
+func requiredRole(commandType string) Role {
+	switch commandType {
+	case "start", "stop", "resume", "set-mode", "set-policy":
+		return RoleOperator
+	default:
+		return RoleAdmin
+	}
+}
+
 func decodeJSON(request *http.Request, target any) error {
-	decoder := json.NewDecoder(io.LimitReader(request.Body, 1<<20))
+	request.Body = http.MaxBytesReader(nil, request.Body, 1<<20)
+	decoder := json.NewDecoder(request.Body)
 	decoder.DisallowUnknownFields()
-	return decoder.Decode(target)
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		if err == nil {
+			return errors.New("request body must contain one JSON value")
+		}
+		return err
+	}
+	return nil
 }
 
 func writeJSON(writer http.ResponseWriter, status int, value any) {

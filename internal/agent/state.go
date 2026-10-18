@@ -5,15 +5,28 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"time"
 
+	"github.com/jellybelly420/pearl-netbar-miner/internal/config"
 	"github.com/jellybelly420/pearl-netbar-miner/internal/fsutil"
+	"github.com/jellybelly420/pearl-netbar-miner/internal/policy"
 )
 
 type State struct {
-	ManualPaused bool   `json:"manual_paused"`
-	ForceRun     bool   `json:"force_run"`
-	PolicyMode   string `json:"policy_mode,omitempty"`
-	LastCommand  uint64 `json:"last_command"`
+	ManualPaused        bool           `json:"manual_paused"`
+	ForceRun            bool           `json:"force_run"`
+	PolicyMode          string         `json:"policy_mode,omitempty"`
+	LastCommand         uint64         `json:"last_command"`
+	Policy              *policy.Config `json:"policy,omitempty"`
+	Mining              *config.Mining `json:"mining,omitempty"`
+	Miner               *config.Miner  `json:"miner,omitempty"`
+	PreviousMiner       *config.Miner  `json:"previous_miner,omitempty"`
+	MinerUpdatedAt      time.Time      `json:"miner_updated_at,omitempty"`
+	ManifestGeneratedAt time.Time      `json:"manifest_generated_at,omitempty"`
+	RunStartedAt        time.Time      `json:"run_started_at,omitempty"`
+	LastStoppedAt       time.Time      `json:"last_stopped_at,omitempty"`
+	RestUntil           time.Time      `json:"rest_until,omitempty"`
+	HealthPauseUntil    time.Time      `json:"health_pause_until,omitempty"`
 }
 
 func LoadState(path string) (State, error) {
